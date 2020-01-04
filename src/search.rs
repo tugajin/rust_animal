@@ -1,4 +1,6 @@
 use std::fmt;
+use rand::{thread_rng, Rng};
+use rand::seq::SliceRandom;
 use crate::common::*;
 use crate::position::*;
 use crate::gen::*;
@@ -6,10 +8,21 @@ use crate::attack::*;
 use crate::eval::*;
 use crate::game::*;
 
+const MAX_SP : usize = 2048;
+
+#[derive(Debug, Copy, Clone)]
+struct Stack {
+    pub key : Key,
+    pub hand_b : Key,
+}
+
 pub struct Thread {
     pub pos : Position,
     pub best_move : MoveSc,
     pub nodes : u64,
+    root_turn : Color,
+    pub stack_sp : usize,
+    stack : Vec<Stack>,
 }
 #[derive(
     Debug,
@@ -74,152 +87,203 @@ impl fmt::Display for PV {
 
 impl Thread {
     pub fn new(pos : Position) -> Thread {
-        let th = Thread {
+        let mut th = Thread {
             pos : pos,
             best_move : MoveSc::MOVE_NONE,
             nodes : 0,
+            stack : Vec::new(),
+            root_turn : Color::BLACK,
+            stack_sp : 0,
         };
+        let stc = Stack {key : Key(0), hand_b : Key(0)};
+        th.stack = vec![stc; MAX_SP];
+        th.root_turn = th.pos.turn();
         th
     }
 
-}
-
-pub fn think(pos : &Position) {
-    let mut ml = MoveList::new();
-    ml.gen_legal(pos);
-    let mut new_pv : PV  = PV::new();
-    search_root(&mut ml, pos,  Depth::new(7), Score::SCORE_MIN, Score::SCORE_MAX, &mut new_pv);
-    let mut th_lock = G_THREAD.lock().unwrap();
-    th_lock.best_move.sc = Score::SCORE_MIN;
-    for index in 0..ml.pos {
-        let mc = &mut ml.mv[index];
-        if mc.sc > th_lock.best_move.sc {
-            th_lock.best_move = mc.clone();
+    fn check_rep(&self, ply :usize) -> bool {
+        let mut index : i32 = (ply as i32) - 4 ;
+        let mut count = 0;
+        while index >= 0 && count < 2 {
+            if self.pos.key() == self.stack[index as usize].key 
+            && self.pos.hand_b() == self.stack[index as usize].hand_b {
+                //println!("same {} {}!",ply,index);
+                return true;
+            }
+            index -= 2;
+            count += 1;
         }
+        false
     }
-}
 
-pub fn search_root(ml : &mut MoveList, pos : &Position, depth : Depth, alpha : Score , beta : Score, pv : &mut PV ) {
-    let mut best_sc = Score::SCORE_MIN;
-    let mut alpha = alpha;
-    let mut new_pv : PV  = PV::new();
-    for index in 0..ml.pos {
-        let mc = &mut ml.mv[index];
-        let new_pos = pos.do_move(mc.mv);
-        let new_depth = depth - Depth(1);
-        let sc = -search(&new_pos, -beta, -alpha, new_depth, 1, &mut new_pv);
-        println!("root : {} {}",sc.0,mc.mv);
-        mc.sc = sc;
-        if sc > best_sc {
-            best_sc = sc;
-            pv.add(mc.mv,&mut new_pv);
-            println!("PV");
-            println!("{}",pv);
-            //to front
-            if sc > alpha {
-                alpha = sc;
+    pub fn think(&mut self) {
+        let mut ml = MoveList::new();
+        ml.gen_legal(&self.pos);
+
+        //let mut rng = rand::thread_rng();
+        //ml.mv.shuffle(&mut rng);
+
+        let mut new_pv : PV  = PV::new();
+        self.search_root(&mut ml,  Depth::new(4), Score::EVAL_MIN, Score::EVAL_MAX, &mut new_pv);
+        self.best_move.sc = Score::EVAL_MIN;
+        for index in 0..ml.size {
+            let mc = &mut ml.mv[index];
+            if mc.sc > self.best_move.sc {
+                self.best_move = mc.clone();
             }
         }
-    }
-}
-
-pub fn search(pos : &Position, alpha : Score, beta : Score, depth : Depth, ply : i32, mut pv : &mut PV) -> Score {
-
-    if is_win(pos) {
-        //println!("win");
-        //println!("{}",pos);
-        return Score::SCORE_MAX;
-    }
-    if depth < Depth::DEPTH_ZERO {
-        return quies_search(pos, alpha, beta, ply+1, &mut pv);
-        //return Score::SCORE_NONE;
-    }
-
-    if ply > Depth::MAX_PLY {
-        return Score::SCORE_NONE;
-    }
-
-    let mut th_lock = G_THREAD.lock().unwrap();
-    th_lock.nodes += 1;
-    drop(th_lock);
-
-    assert!(pos.is_ok());
-    assert!(alpha < beta);
-    assert!(ply >= 0 && ply <= Depth::MAX_PLY);
-
-    let mut alpha = alpha;
-    let mut best_sc = Score::SCORE_MIN;
-    let mut ml = MoveList::new();
-    let mut new_pv = PV::new();
-    ml.gen_all(pos);
-    for i in 0..ml.pos {
-        let mc = ml.mv[i];
-        let new_pos = pos.do_move(mc.mv);
-        let new_depth = depth - Depth::DEPTH_ONE;
-        let sc = -search(&new_pos, -beta, -alpha, new_depth, ply+1, &mut new_pv);
-        //println!("{}", pos);
-        //println!("{}", mc.mv);
-        //println!("ply:{} score is {}",ply,sc.0);
-        if sc > best_sc {
-            best_sc = sc;
-            pv.add(mc.mv,&mut new_pv);
-            if sc >= beta {
-                return best_sc;
-            }
-            if sc > alpha {
-                alpha = sc;
-            }
-        }
-    }
-    best_sc
-}
-
-pub fn quies_search(pos : &Position, alpha : Score, beta : Score, ply : i32, pv : &mut PV) -> Score {
-
-    if is_win(pos) {
-        return Score::SCORE_MAX;
     }
     
-    assert!(pos.is_ok());
+    pub fn search_root(&mut self, ml : &mut MoveList, depth : Depth, alpha : Score , beta : Score, pv : &mut PV ) {
+        let mut best_sc = Score::EVAL_MIN;
+        let mut alpha = alpha;
+        let mut new_pv : PV  = PV::new();
+        let org_pos = self.pos.clone();
+        
+        self.stack.insert(self.stack_sp,Stack{ key:self.pos.key(), hand_b:self.pos.hand_b() });
 
-    if ply > Depth::MAX_PLY {
-        return Score::SCORE_NONE;
-    }
-
-    let mut th_lock = G_THREAD.lock().unwrap();
-    th_lock.nodes += 1;
-    drop(th_lock);
-
-    let mut best_sc : Score = Score::SCORE_MIN;
-    let mut ml = MoveList::new();
-
-    if in_checked(pos) {
-        ml.gen_legal(pos);
-    } else {
-        best_sc = eval(pos);
-        // stand-pat
-        if best_sc >= beta {
-            return best_sc;
+        for index in 0..ml.size {
+            let mc = &mut ml.mv[index];
+            self.pos = self.pos.do_move(mc.mv);
+            let new_depth = depth - Depth(1);
+            let sc = -self.search(-beta, -alpha, new_depth, 1, &mut new_pv);
+            self.pos = org_pos.clone();
+            //println!("root : {} {}",sc.0,mc.mv);
+            mc.sc = sc;
+            if sc > best_sc {
+                best_sc = sc;
+                pv.add(mc.mv,&mut new_pv);
+                //println!("PV");
+                //println!("{}",pv);
+                //to front
+                if sc > alpha {
+                    alpha = sc;
+                }
+            }
         }
-        ml.gen_cap(pos);
     }
-    let mut alpha = alpha;
-    let mut new_pv = PV::new();
+    
+    pub fn search(&mut self, alpha : Score, beta : Score, depth : Depth, ply : i32, mut pv : &mut PV) -> Score {
+    
+        if is_win(&self.pos) {
+            //println!("win");
+            //println!("{}",pos);
+            return Score::in_mate(ply);
+        }
+        if depth < Depth::DEPTH_ZERO {
+            return self.quies_search(alpha, beta, ply+1, &mut pv);
+            //return Score::SCORE_NONE;
+        }
+    
+        if ply > Depth::MAX_PLY {
+            return Score::SCORE_NONE;
+        }
 
-    for i in 0..ml.pos {
-        let mc = ml.mv[i];
-        let new_pos = pos.do_move(mc.mv);
-        let sc = -quies_search(&new_pos, -beta, -alpha, ply+1, &mut new_pv);
-        if sc > best_sc {
-            best_sc = sc;
-            pv.add(mc.mv,&mut new_pv);
-            if sc >= beta {
+        assert!(&self.pos.is_ok());
+        debug_assert!(alpha < beta,"alpha {} : beta {}",alpha.0,beta.0);
+        assert!(ply >= 0 && ply <= Depth::MAX_PLY);
+
+        self.nodes += 1;
+
+        self.stack.insert(self.stack_sp + (ply as usize), Stack{ key:self.pos.key(), hand_b:self.pos.hand_b() });
+
+        if self.check_rep(self.stack_sp + (ply as usize)) {
+            /*if self.root_turn != self.pos.turn() {
+                return Score::SCORE_REP;
+            } else {
+                return Score::SCORE_REP;
+            }*/
+            return Score::SCORE_NONE;
+        }
+        
+        let mut alpha = alpha;
+        let mut best_sc = Score::EVAL_MIN;
+        let mut ml = MoveList::new();
+        let mut new_pv = PV::new();
+        let org_pos = self.pos.clone();
+        ml.gen_all(&self.pos);
+        ml.insersion_sort();
+        //let mut rng = rand::thread_rng();
+        //ml.mv.shuffle(&mut rng);
+
+
+        for i in 0..ml.size {
+            let mc = ml.mv[i];
+            self.pos = self.pos.do_move(mc.mv);
+
+            let new_depth = depth - Depth::DEPTH_ONE;
+            let sc = -self.search(-beta, -alpha, new_depth, ply+1, &mut new_pv);
+            self.pos = org_pos.clone();
+            //println!("{}", pos);
+            //println!("{}", mc.mv);
+            //println!("ply:{} score is {}",ply,sc.0);
+            if sc > best_sc {
+                best_sc = sc;
+                pv.add(mc.mv,&mut new_pv);
+                if sc >= beta {
+                    return best_sc;
+                }
+                if sc > alpha {
+                    alpha = sc;
+                }
+            }
+        }
+        best_sc
+    }
+    
+    pub fn quies_search(&mut self, alpha : Score, beta : Score, ply : i32, pv : &mut PV) -> Score {
+    
+        if is_win(&self.pos) {
+            return Score::SCORE_MAX;
+        }
+        
+        assert!(&self.pos.is_ok());
+    
+        if ply > Depth::MAX_PLY {
+            return Score::SCORE_NONE;
+        }
+        self.nodes += 1;
+    
+        let mut best_sc : Score = Score::EVAL_MIN;
+        let mut ml = MoveList::new();
+    
+        if in_checked(&self.pos) {
+            ml.gen_legal(&self.pos);
+        } else {
+            best_sc = eval(&self.pos);
+            // stand-pat
+            if best_sc >= beta {
                 return best_sc;
             }
-            if sc > alpha {
-                alpha = sc;
+            ml.gen_cap(&self.pos);
+        }
+        ml.insersion_sort();
+        let mut alpha = alpha;
+        let mut new_pv = PV::new();
+        let org_pos = self.pos.clone();
+
+        //let mut rng = rand::thread_rng();
+        //ml.mv.shuffle(&mut rng);
+    
+        for i in 0..ml.size {
+            let mc = ml.mv[i];
+            
+            self.pos = self.pos.do_move(mc.mv);
+            let sc = -self.quies_search(-beta, -alpha, ply+1, &mut new_pv);
+            self.pos = org_pos.clone();
+            if sc > best_sc {
+                best_sc = sc;
+                pv.add(mc.mv,&mut new_pv);
+                if sc >= beta {
+                    return best_sc;
+                }
+                if sc > alpha {
+                    alpha = sc;
+                }
             }
         }
+        best_sc
     }
-    best_sc
 }
+
+

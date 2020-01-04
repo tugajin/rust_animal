@@ -1,4 +1,5 @@
 use crate::common::*;
+use crate::eval::*;
 use std::fmt;
 use std::collections::HashSet;
 use rand::Rng;
@@ -11,6 +12,7 @@ pub struct Position {
     turn : Color,
     hand : [Hand; Color::COLOR_SIZE],
     raion_sq : [Square; Color::COLOR_SIZE],
+    material : Score,
 }
 
 pub const START_SFEN: &str = "krz/1h1/1H1/ZRK b - 1";
@@ -55,6 +57,7 @@ impl Position {
             turn: Color::BLACK,
             hand: [Hand::HAND_NONE; Color::COLOR_SIZE],
             raion_sq: [Square::WALL; Color::COLOR_SIZE],
+            material : Score::SCORE_NONE,
         }
     }
 
@@ -72,6 +75,15 @@ impl Position {
     }
     pub fn has(&self, c : Color, p : Piece) -> bool {
         self.hand[c.0 as usize].has(p)
+    }
+    pub fn material(&self) -> Score {
+        self.material
+    }
+    pub fn key(&self) -> Key {
+        self.key
+    }
+    pub fn hand_b(&self) -> Key {
+        self.hand_b
     }
     pub fn do_move(&self, mv : Move) -> Position {
         
@@ -104,10 +116,13 @@ impl Position {
             } else {
                 pos.square[to.0 as usize] = Piece::NIWATORI.to_piece_color(pos.turn());
                 pos.key ^= ZOBRIST[me.0 as usize][Piece::NIWATORI.0 as usize][to.0 as usize];
+                pos.material += if me == Color::BLACK {  PIECE_SCORE[Piece::NIWATORI.0 as usize] - PIECE_SCORE[Piece::HIYOKO.0 as usize]  } 
+                                                 else {-(PIECE_SCORE[Piece::NIWATORI.0 as usize] - PIECE_SCORE[Piece::HIYOKO.0 as usize]) };
             }
             if cap != Piece::EMPTY {
                 pos.hand[pos.turn().0 as usize].inc(cap);
                 pos.key ^= ZOBRIST[opp.0 as usize][cap.0 as usize][to.0 as usize];
+                pos.material += if me == Color::BLACK { PIECE_EX_SCORE[cap.0 as usize] } else { -PIECE_EX_SCORE[cap.0 as usize] };
             }
         }
         pos.turn = Color::flip(pos.turn());
@@ -183,6 +198,7 @@ impl Position {
         }
         pos.hand_b = Key(pos.hand[Color::BLACK.0 as usize].val() as u64);
         pos.key = pos.gen_key();
+        pos.material = pos.calc_material();
         pos
     }
     fn gen_key(&self) -> Key {
@@ -199,6 +215,25 @@ impl Position {
             }
         }
         key
+    }
+    fn calc_material(&self) -> Score {
+        let mut sc = Score::SCORE_NONE;
+        for sq in Square::SQ_INDEX.iter() {
+            let pc = self.square[sq.0 as usize];
+            if PieceColor::is_piece(pc) {
+                let p = pc.to_piece();
+                let col = pc.color();
+                sc += if col == Color::BLACK { PIECE_SCORE[p.0 as usize] } else { -PIECE_SCORE[p.0 as usize] };
+            }
+        }
+        sc += PIECE_SCORE[Piece::HIYOKO.0 as usize] * self.hand_num(Color::BLACK, Piece::HIYOKO) as i32;
+        sc += PIECE_SCORE[Piece::KIRIN.0 as usize] * self.hand_num(Color::BLACK, Piece::KIRIN) as i32;
+        sc += PIECE_SCORE[Piece::ZOU.0 as usize] * self.hand_num(Color::BLACK, Piece::ZOU) as i32;
+
+        sc -= PIECE_SCORE[Piece::HIYOKO.0 as usize] * self.hand_num(Color::WHITE, Piece::HIYOKO) as i32;
+        sc -= PIECE_SCORE[Piece::KIRIN.0 as usize] * self.hand_num(Color::WHITE, Piece::KIRIN) as i32;
+        sc -= PIECE_SCORE[Piece::ZOU.0 as usize] * self.hand_num(Color::WHITE, Piece::ZOU) as i32;
+        sc
     }
     pub fn is_ok(&self) -> bool {
         let wall_sq = vec![0, 1, 2, 3, 4, 5, 9, 10, 14, 15, 19, 20, 24, 25, 26, 27, 28, 29];
@@ -263,6 +298,11 @@ impl Position {
         let debug_key = self.gen_key();
         if self.key != debug_key {
             println!("key error. {} {} line: {}", self.key.0, debug_key.0, line!());
+            return false;
+        }
+        let debug_material = self.calc_material();
+        if self.material != debug_material {
+            println!("material error. {}\n {} {} line: {}",self ,self.material.0, debug_material.0, line!());
             return false;
         }
         true
@@ -409,5 +449,5 @@ fn test_position() {
         assert_eq!(pos.hand_num(Color::WHITE, Piece::ZOU),2);
         assert_eq!(pos.hand_num(Color::WHITE, Piece::KIRIN),2);
 
-    }
+    } 
 }

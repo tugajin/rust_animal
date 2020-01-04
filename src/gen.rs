@@ -2,6 +2,7 @@ use std::fmt;
 use crate::common::*;
 use crate::position::*;
 use crate::attack::*;
+use crate::eval::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct MoveSc {
@@ -22,15 +23,15 @@ impl MoveSc {
 }
 pub struct MoveList {
     pub mv: [MoveSc; MoveList::MAX_LEGAL_MOVE],
-    pub pos : usize,
+    pub size : usize,
 }
 impl fmt::Display for MoveList {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-       let mut s : String = "".to_string();
-       for _i in 0..self.pos {
-           s = s + &_i.to_string() + " : " +  &self.mv[_i].mv.to_string() + " : " + &self.mv[_i].sc.0.to_string() + "\n";
-       }
-       write!(f,"{}",s)
+        let mut s : String = "".to_string();
+        for i in 0..self.size {
+            s = s + &i.to_string() + " : " +  &self.mv[i].mv.to_string() + " : " + &self.mv[i].sc.0.to_string() + "\n";
+        }
+        write!(f,"{}",s)
     }  
 }
 
@@ -39,12 +40,35 @@ impl MoveList {
     pub fn new() -> MoveList {
         MoveList {
             mv : [ MoveSc::MOVE_NONE; MoveList::MAX_LEGAL_MOVE],
-            pos : 0,
+            size : 0,
         }
     }
+    pub fn begin(&self) -> &[MoveSc] {
+        &self.mv[0..self.size]
+    }
+    pub fn begin_mut(&mut self) -> &mut [MoveSc] {
+        &mut self.mv[0..self.size]
+    }
+    pub fn clear(&mut self) {
+        self.size = 0;
+    }
     pub fn add(&mut self, mv : MoveSc) {
-        self.mv[self.pos] = mv;
-        self.pos += 1;
+        self.mv[self.size] = mv;
+        self.size += 1;
+    }
+    pub fn insersion_sort(&mut self) {
+        let size = self.size;
+        if size <= 1 { return; }
+        self.mv[size].sc = Score::SCORE_MIN;
+        for i in (0..size-1).rev() {
+            let tmp = self.mv[i];
+            let mut j = i+1;
+            while tmp.sc < self.mv[j].sc {
+                self.mv[j-1] = self.mv[j];
+                j += 1;
+            }
+            self.mv[j-1] = tmp;
+        }
     }
     const MAX_LEGAL_MOVE : usize = 400;
     pub fn gen_all(&mut self, pos : &Position) {
@@ -54,10 +78,11 @@ impl MoveList {
         self.add_cap(pos);
     }
     pub fn gen_legal(&mut self, pos : &Position) {
+        debug_assert!(pos.is_ok());
         let tmp_pos = pos;
         let mut tmp_ml = MoveList::new();
         tmp_ml.add_all(&pos);
-        for i in 0..tmp_ml.pos {
+        for i in 0..tmp_ml.size {
             let ms = tmp_ml.mv[i as usize];
             let tmp_pos2 = tmp_pos.do_move(ms.mv);
             if is_win(&tmp_pos2) { continue; }
@@ -65,6 +90,7 @@ impl MoveList {
         }
     }
     fn add_all(&mut self, pos : &Position) {
+        debug_assert!(pos.is_ok());
         let me = pos.turn();
         let opp = Color::flip(me);
         for sq in Square::SQ_INDEX.iter() {
@@ -77,8 +103,10 @@ impl MoveList {
                         let to = *sq + $inc;
                         let cap = pos.square(to);
                         if (cap == PieceColor::EMPTY) || (cap.is_us(opp)) {
-                            let mv = make_noprom_move(*sq, to, $p, cap.to_piece());
-                            self.add(MoveSc::mv(mv));                        
+                            let cap_p = cap.to_piece();
+                            let mv = make_noprom_move(*sq, to, $p, cap_p);
+                            let sc = if cap != PieceColor::EMPTY { PIECE_SCORE[cap_p.0 as usize] - PIECE_SCORE[$p.0 as usize] } else { Score::SCORE_NONE };
+                            self.add(MoveSc::new(mv,sc));                        
                         }
                     };
                 }
@@ -88,10 +116,18 @@ impl MoveList {
                         let to = if me == Color::BLACK { *sq + Square::INC_N } else { *sq + Square::INC_S };
                         let cap = pos.square(to);
                         if (cap == PieceColor::EMPTY) || (cap.is_us(opp)) {
+                            let cap_p = cap.to_piece();
                             let prom = if me == Color::BLACK { to <= Square::C1 } else { to >= Square::A4 };
                             let mv = if prom { make_prom_move(*sq, to, cap.to_piece()) } 
                                      else    { make_noprom_move(*sq, to, Piece::HIYOKO, cap.to_piece()) };
-                            self.add(MoveSc::mv(mv));                        
+                            let mut sc = Score::SCORE_NONE;
+                            if cap != PieceColor::EMPTY {
+                                sc = PIECE_SCORE[cap_p.0 as usize] - PIECE_SCORE[Piece::HIYOKO.0 as usize];
+                            }
+                            if prom {
+                                sc += PIECE_SCORE[Piece::NIWATORI.0 as usize] - PIECE_SCORE[Piece::HIYOKO.0 as usize];
+                            }
+                            self.add(MoveSc::new(mv,sc));                        
                         }
                     },
                     Piece::KIRIN => {
@@ -142,7 +178,7 @@ impl MoveList {
                         if pos.has(me,$p) {
                             let to = *sq;
                             let mv = make_drop_move(to, $p);
-                            self.add(MoveSc::mv(mv));                            
+                            self.add(MoveSc::new(mv,Score::EVAL_MIN));                            
                         }
                     };
                 }
@@ -153,6 +189,7 @@ impl MoveList {
         }
     }
     fn add_cap(&mut self, pos : &Position) {
+        debug_assert!(pos.is_ok());
         let me = pos.turn();
         let opp = Color::flip(me);
         for sq in Square::SQ_INDEX.iter() {
@@ -165,21 +202,29 @@ impl MoveList {
                         let to = *sq + $inc;
                         let cap = pos.square(to);
                         if cap.is_us(opp) {
-                            let mv = make_noprom_move(*sq, to, $p, cap.to_piece());
-                            self.add(MoveSc::mv(mv));                        
+                            let cap_p = cap.to_piece();
+                            let mv = make_noprom_move(*sq, to, $p, cap_p);
+                            let sc = PIECE_SCORE[cap_p.0 as usize] - PIECE_SCORE[$p.0 as usize];
+                            self.add(MoveSc::new(mv,sc));                        
                         }
                     };
                 }
                 
                 match p {
                     Piece::HIYOKO => {
+
                         let to = if me == Color::BLACK { *sq + Square::INC_N } else { *sq + Square::INC_S };
                         let cap = pos.square(to);
                         if cap.is_us(opp) {
+                            let cap_p = cap.to_piece();
                             let prom = if me == Color::BLACK { to <= Square::C1 } else { to >= Square::A4 };
                             let mv = if prom { make_prom_move(*sq, to, cap.to_piece()) } 
                                      else    { make_noprom_move(*sq, to, Piece::HIYOKO, cap.to_piece()) };
-                            self.add(MoveSc::mv(mv));                        
+                            let mut sc = PIECE_SCORE[cap_p.0 as usize] - PIECE_SCORE[Piece::HIYOKO.0 as usize];
+                            if prom {
+                                sc += PIECE_SCORE[Piece::NIWATORI.0 as usize] - PIECE_SCORE[Piece::HIYOKO.0 as usize];
+                            }
+                            self.add(MoveSc::new(mv,sc));                        
                         }
                     },
                     Piece::KIRIN => {
@@ -230,92 +275,48 @@ impl MoveList {
 }
 #[test]
 fn test_gen() {
+    macro_rules! test_gen_all {
+        ($sfen:expr, $size:expr) => {
+            {
+                let pos = Position::init_sfen($sfen);
+                println!("{}",pos);
+                let mut ml = MoveList::new();
+                ml.gen_all(&pos);
+                println!("{}",ml);
+                assert_eq!(ml.size, $size);
+            }
+        };
+    }
+    test_gen_all!(START_SFEN,4);
+    test_gen_all!("krz/1h1/1H1/ZRK w - 1",4);
+    test_gen_all!("1r1/3/3/1R1 b hkzHKZ",35);
+    test_gen_all!("1r1/3/3/1R1 w hkzHKZ",35);
+    test_gen_all!("r2/3/1N1/R2 b",8);
+    test_gen_all!("r2/3/1H1/R2 b",3);
+    test_gen_all!("r2/3/1h1/R2 w",4);
+    test_gen_all!("r2/1n1/3/R2 w",8);
+    test_gen_all!("RKZ/HH1/3/2r b",0);
+    test_gen_all!("R2/3/hh1/rkz w",0);
+    test_gen_all!("kHz/1r1/3/ZRK b h",5);
     {
         let pos = Position::init_sfen(START_SFEN);
         println!("{}",pos);
         let mut ml = MoveList::new();
         ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 4);
+        for mc in ml.begin().iter() {
+            println!("{}",mc.mv);
+        }
+        ml.clear();
     }
     {
-        let pos = Position::init_sfen("krz/1h1/1H1/ZRK w - 1");
+        let pos = Position::init_sfen("1r1/3/zhk/KRZ b H");
         println!("{}",pos);
         let mut ml = MoveList::new();
         ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 4);
-    }
-    {
-        let pos = Position::init_sfen("1r1/3/3/1R1 b hkzHKZ");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 35);
-    }
-    {
-        let pos = Position::init_sfen("1r1/3/3/1R1 w hkzHKZ");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 35);
-    }
-    {
-        let pos = Position::init_sfen("r2/3/1N1/R2 b");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 8);
-    }
-    {
-        let pos = Position::init_sfen("r2/3/1H1/R2 b");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 3);
-    }
-    {
-        let pos = Position::init_sfen("r2/3/1h1/R2 w");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 4);
-    }
-    {
-        let pos = Position::init_sfen("r2/1n1/3/R2 w");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 8);
-    }
-    {
-        let pos = Position::init_sfen("RKZ/HH1/3/2r b");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 0);
-    }
-    {
-        let pos = Position::init_sfen("R2/3/hh1/rkz w");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 0);
-    }
-    {
-        let pos = Position::init_sfen("kHz/1r1/3/ZRK b h");
-        println!("{}",pos);
-        let mut ml = MoveList::new();
-        ml.gen_all(&pos);
-        println!("{}",ml);
-        assert_eq!(ml.pos, 5);
+        ml.insersion_sort();
+        for mc in ml.begin().iter() {
+            println!("{} {}",mc.mv, mc.sc.0);
+        }
+        assert!(false);
     }
 }

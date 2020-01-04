@@ -296,7 +296,9 @@ impl Square {
             _ => { false }
         }
     }
-
+    pub fn reverse(sq : Square) -> Square {
+        Square(29 - sq.0)
+    }
 }
 
 impl fmt::Display for Square {
@@ -317,6 +319,26 @@ impl fmt::Display for Square {
             _ => write!(f, "SQUARE_ERROR:{}", self.0),
         }
     }  
+}
+
+#[test]
+fn test_square() {
+    {
+        let sq = Square::A1;
+        assert!(Square::is_ok(sq));
+    }
+    {
+        let sq = Square(0);
+        assert!(!Square::is_ok(sq));
+    }
+    {
+        let sq = Square::A1;
+        assert_eq!(Square::reverse(sq),Square::C4);
+    }
+    {
+        let sq = Square::B2;
+        assert_eq!(Square::reverse(sq),Square::B3);
+    }
 }
 
 // * **  *  **  *  **
@@ -679,14 +701,11 @@ impl Score {
     pub const  SCORE_NONE : Score = Score(0);
     pub const  EVAL_MIN   : Score = Score(-30000);
     pub const  EVAL_MAX   : Score = Score( 30000);
+    pub const  SCORE_REP  : Score = Score( 30001);
+    pub fn in_mate(ply : i32) -> Score {
+        Score(Score::EVAL_MAX.0 - ply)
+    }
 }
 
-pub static PIECE_SCORE : [Score ; Piece::PIECE_SIZE] = [
-    Score(0),Score(100), Score(300), Score(300), Score(16000), Score(500)
-];
-pub static PIECE_EX_SCORE : [Score ; Piece::PIECE_SIZE] = [
-    Score(PIECE_SCORE[0].0 * 2), Score(PIECE_SCORE[1].0 * 2), Score(PIECE_SCORE[2].0 * 2),
-    Score(PIECE_SCORE[3].0 * 2), Score(PIECE_SCORE[4].0 * 2), Score(PIECE_SCORE[5].0 * 2)]; 
-
-#[derive(Clone, Copy, PartialEq, Eq, BitXor, BitXorAssign, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, BitXor, BitXorAssign, Hash)]
 pub struct Key(pub u64);
