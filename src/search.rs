@@ -11,9 +11,15 @@ use crate::game::*;
 const MAX_SP : usize = 2048;
 
 #[derive(Debug, Copy, Clone)]
-struct Stack {
+pub struct Stack {
     pub key : Key,
     pub hand_b : Key,
+    pub mv : Move,
+}
+impl Stack {
+    pub fn new() -> Stack {
+        Stack { key : Key(0), hand_b : Key(0), mv : Move::MOVE_NONE, }
+    }
 }
 
 pub struct Thread {
@@ -22,7 +28,7 @@ pub struct Thread {
     pub nodes : u64,
     root_turn : Color,
     pub stack_sp : usize,
-    stack : Vec<Stack>,
+    pub stack : Vec<Stack>,
 }
 #[derive(
     Debug,
@@ -95,7 +101,7 @@ impl Thread {
             root_turn : Color::BLACK,
             stack_sp : 0,
         };
-        let stc = Stack {key : Key(0), hand_b : Key(0)};
+        let stc = Stack::new();
         th.stack = vec![stc; MAX_SP];
         th.root_turn = th.pos.turn();
         th
@@ -140,7 +146,7 @@ impl Thread {
         let mut new_pv : PV  = PV::new();
         let org_pos = self.pos.clone();
         
-        self.stack.insert(self.stack_sp,Stack{ key:self.pos.key(), hand_b:self.pos.hand_b() });
+        self.stack.insert(self.stack_sp,Stack{ key:self.pos.key(), hand_b:self.pos.hand_b(), mv : Move::MOVE_NONE });
 
         for index in 0..ml.size {
             let mc = &mut ml.mv[index];
@@ -172,7 +178,7 @@ impl Thread {
         }
         if depth < Depth::DEPTH_ZERO {
             return self.quies_search(alpha, beta, ply+1, &mut pv);
-            //return Score::SCORE_NONE;
+           // return eval(&self.pos);
         }
     
         if ply > Depth::MAX_PLY {
@@ -185,7 +191,7 @@ impl Thread {
 
         self.nodes += 1;
 
-        self.stack.insert(self.stack_sp + (ply as usize), Stack{ key:self.pos.key(), hand_b:self.pos.hand_b() });
+        self.stack.insert(self.stack_sp + (ply as usize), Stack{ key:self.pos.key(), hand_b:self.pos.hand_b(), mv : Move::MOVE_NONE });
 
         if self.check_rep(self.stack_sp + (ply as usize)) {
             /*if self.root_turn != self.pos.turn() {
@@ -205,10 +211,20 @@ impl Thread {
         ml.insersion_sort();
         //let mut rng = rand::thread_rng();
         //ml.mv.shuffle(&mut rng);
-
+        let in_check = in_checked(&self.pos);
 
         for i in 0..ml.size {
             let mc = ml.mv[i];
+            if in_check {
+                if mc.mv.is_drop() {
+                    continue;
+                }
+                let pc = mc.mv.piece();
+                let cap = mc.mv.cap();
+                if pc != Piece::RAION && cap == Piece::EMPTY {
+                    continue;
+                }
+            }
             self.pos = self.pos.do_move(mc.mv);
 
             let new_depth = depth - Depth::DEPTH_ONE;
@@ -246,8 +262,9 @@ impl Thread {
     
         let mut best_sc : Score = Score::EVAL_MIN;
         let mut ml = MoveList::new();
+        let in_check = in_checked(&self.pos);
     
-        if in_checked(&self.pos) {
+        if in_check {
             ml.gen_legal(&self.pos);
         } else {
             best_sc = eval(&self.pos);
@@ -267,7 +284,16 @@ impl Thread {
     
         for i in 0..ml.size {
             let mc = ml.mv[i];
-            
+            if in_check {
+                if mc.mv.is_drop() {
+                    continue;
+                }
+                let pc = mc.mv.piece();
+                let cap = mc.mv.cap();
+                if pc != Piece::RAION && cap == Piece::EMPTY {
+                    continue;
+                }
+            }
             self.pos = self.pos.do_move(mc.mv);
             let sc = -self.quies_search(-beta, -alpha, ply+1, &mut new_pv);
             self.pos = org_pos.clone();

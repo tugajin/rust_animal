@@ -546,6 +546,28 @@ impl Move {
     pub fn is_drop(self) -> bool {
         self.0 & (Square::SQ_DROP.0 as u32) != 0
     } 
+    pub fn to_usi(self) -> String {
+        
+        let mut s = "".to_string();
+        if self == Move::MOVE_NONE {
+            return s;
+        }
+        if self == Move::MOVE_NULL {
+            return "NULL".to_string();
+        }
+        if self.is_drop() {
+            let to = self.to();
+            let p = self.piece();
+            s = s + "*"  + &to.to_string() + &p.to_string();
+        } else {
+            let from = self.from();
+            let to = self.to();
+            let p =self.piece();
+            let prom = if self.prom() { "+" } else { "" };
+            s = s + &from.to_string() + &to.to_string() + &p.to_string() + &prom;
+        }
+        s
+    }
 
     pub fn is_ok(m : Move) -> bool {
         if m.is_drop() {

@@ -313,6 +313,7 @@ impl fmt::Display for Position {
         let mut s : String = "".to_string();
         s = s + "Key : " + &self.key.0.to_string() + "\n";
         s = s + "Turn : " + &self.turn.to_string() + "\n";
+        s = s + "Mat : " +&self.material.0.to_string() + "\n";
         s = s +  &self.hand[Color::WHITE.0 as usize].to_string() + "\n";
         s += "   A  B  C\n";
         for (sq, index) in Square::SQ_INDEX.iter().enumerate() {

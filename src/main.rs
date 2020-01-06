@@ -20,4 +20,5 @@ cargo run
 
 fn main() {
     game::game();
+    //python::main();
 }
