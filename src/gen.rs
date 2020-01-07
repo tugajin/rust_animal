@@ -70,6 +70,18 @@ impl MoveList {
             self.mv[j-1] = tmp;
         }
     }
+    pub fn note_move_score(&mut self, pos : &Position) {
+        for mc in self.begin_mut() {
+            if mc.mv.cap() != Piece::EMPTY || mc.mv.piece() == Piece::RAION {
+                let sc = see(mc.mv,Score::SCORE_MIN, Score::SCORE_MAX, &pos);
+                if sc < Score::SCORE_NONE {
+                    mc.sc = Score::SCORE_MIN;
+                }
+            } else {
+
+            }
+        }
+    }
     const MAX_LEGAL_MOVE : usize = 400;
     pub fn gen_all(&mut self, pos : &Position) {
         self.add_all(pos);
@@ -178,7 +190,7 @@ impl MoveList {
                         if pos.has(me,$p) {
                             let to = *sq;
                             let mv = make_drop_move(to, $p);
-                            self.add(MoveSc::new(mv,Score::EVAL_MIN));                            
+                            self.add(MoveSc::new(mv,Score::QUIET_MOVE_SCORE));                            
                         }
                     };
                 }
@@ -317,6 +329,6 @@ fn test_gen() {
         for mc in ml.begin().iter() {
             println!("{} {}",mc.mv, mc.sc.0);
         }
-        assert!(false);
+        //assert!(false);
     }
 }

@@ -130,7 +130,10 @@ impl Thread {
         //ml.mv.shuffle(&mut rng);
 
         let mut new_pv : PV  = PV::new();
+        ml.note_move_score(&self.pos);
+        ml.insersion_sort();
         self.search_root(&mut ml,  Depth::new(4), Score::EVAL_MIN, Score::EVAL_MAX, &mut new_pv);
+
         self.best_move.sc = Score::EVAL_MIN;
         for index in 0..ml.size {
             let mc = &mut ml.mv[index];
@@ -208,6 +211,7 @@ impl Thread {
         let mut new_pv = PV::new();
         let org_pos = self.pos.clone();
         ml.gen_all(&self.pos);
+        ml.note_move_score(&self.pos);
         ml.insersion_sort();
         //let mut rng = rand::thread_rng();
         //ml.mv.shuffle(&mut rng);
@@ -274,6 +278,7 @@ impl Thread {
             }
             ml.gen_cap(&self.pos);
         }
+        ml.note_move_score(&self.pos);
         ml.insersion_sort();
         let mut alpha = alpha;
         let mut new_pv = PV::new();
@@ -291,6 +296,10 @@ impl Thread {
                 let pc = mc.mv.piece();
                 let cap = mc.mv.cap();
                 if pc != Piece::RAION && cap == Piece::EMPTY {
+                    continue;
+                }
+            } else {
+                if see(mc.mv,Score::SCORE_MIN,Score::SCORE_MAX,&self.pos) < Score::SCORE_NONE {
                     continue;
                 }
             }

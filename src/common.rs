@@ -724,6 +724,7 @@ impl Score {
     pub const  EVAL_MIN   : Score = Score(-30000);
     pub const  EVAL_MAX   : Score = Score( 30000);
     pub const  SCORE_REP  : Score = Score( 30001);
+    pub const  QUIET_MOVE_SCORE : Score = Score(-15000);
     pub fn in_mate(ply : i32) -> Score {
         Score(Score::EVAL_MAX.0 - ply)
     }
