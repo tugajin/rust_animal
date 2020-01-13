@@ -58,6 +58,16 @@ impl Piece {
             _ => { false }
         }
     }
+    pub fn from_str(s : &str) -> Piece {
+        match s {
+            "H" => Piece::HIYOKO,
+            "K" => Piece::KIRIN,
+            "Z" => Piece::ZOU,
+            "R" => Piece::RAION,
+            "N" => Piece::NIWATORI,
+            _ => Piece::EMPTY
+        }
+    }
 }
 
 impl fmt::Display for Piece {
@@ -298,6 +308,23 @@ impl Square {
     }
     pub fn reverse(sq : Square) -> Square {
         Square(29 - sq.0)
+    }
+    pub fn from_str(s : &str) -> Square {
+        match s {
+            "A1" => Square::A1,
+            "A2" => Square::A2,
+            "A3" => Square::A3,
+            "A4" => Square::A4,
+            "B1" => Square::B1,
+            "B2" => Square::B2,
+            "B3" => Square::B3,
+            "B4" => Square::B4,
+            "C1" => Square::C1,
+            "C2" => Square::C2,
+            "C3" => Square::C3,
+            "C4" => Square::C4,
+            _ => panic!(),
+        }
     }
 }
 

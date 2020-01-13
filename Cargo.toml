@@ -6,7 +6,10 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+
 [dependencies]
-lazy_static = "*"
 derive_more = "*"
-rand = "*"
+lazy_static = "1.3.0"
+rand = "0.6.5"
+tch="0.1.1"
+failure = "0.1"
